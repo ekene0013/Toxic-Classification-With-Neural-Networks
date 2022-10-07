@@ -1,0 +1,255 @@
+import pandas as pd
+import numpy as np
+from collections import defaultdict
+import re, string
+import math
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+# Link to the data set
+https://www.kaggle.com/competitions/jigsaw-toxic-comment-classification-challenge/data  
+
+class Preprocess:
+    
+    def __init__(self, comments, labels):
+        self.comments = comments
+        self.labels = labels
+        self.train_comments = None
+        
+    def pre_process_data(self, reviews, labels):
+        
+        review_vocab = set()
+        for review in reviews:
+            comment = re.split(r"[' ', \n, $, #, =, \, *, ^, @, ?, !, /]", \
+                               review)  
+            for word in comment:
+                review_vocab.add(word)
+        
+        self.review_vocab = list(review_vocab)
+                
+        self.review_vocab_size = len(self.review_vocab)
+        
+        self.word2index = {}
+        for i,word in enumerate(self.review_vocab):
+            self.word2index[word] = i        
+
+        training_comments = list()
+        for comment in comments:
+            indices = set()
+            _comment = re.split(r"[' ', \n, $, #, =, \, *, ^, @, ?, !, /]", comment)
+            for word in _comment:
+                if(word in self.word2index.keys()):
+                    indices.add(self.word2index[word])
+            training_comments.append(list(indices))
+        self.train_comments = training_comments
+        
+
+def split_train(X, y,shuffled=False ,perc=20):
+    num_samples = len(X)
+    if shuffled:
+        X,y=shuffle(X,y,num_samples)
+    split_idx = math.floor(num_samples*(100.0 - perc)/100)
+    
+    X_test = X[split_idx:]
+    y_test = y[split_idx:]
+    X_train = X[:split_idx]
+    y_train = y[:split_idx]
+    return X_train, y_train, X_test, y_test
+
+def shuffle(X,y,n):
+    a=np.arange(n)
+    np.random.shuffle(a)
+    return [X[i] for i in a],[y[i] for i in a]
+
+
+# Define a two layer neural net architecture for pretraining
+class Net(nn.Module):
+    def __init__(self):
+        super(Net, self).__init__()
+        self.fc1 = nn.Linear(len(model.word2index), 256)
+        self.fc2 = nn.Linear(256, 41)
+        self.output = nn.LogSoftmax(dim=1)
+
+    def forward(self, x):
+        xin = 0
+        for index in x:
+            xin += self.fc1.weight[:, index]
+        x = F.relu(xin)
+        x = x[None, :]
+        x = F.relu(self.fc2(x))
+        x = self.output(x)
+        return x
+
+# initialize the NN
+fit = Net()
+print(fit)
+
+# Load and preprocess data
+data = pd.read_csv("train.csv")
+comments = data['comment_text'].copy()
+comments = [comment.lower() for comment in comments]
+label = data1['dummy'].copy()
+
+eda = Preprocess(comments, labels)
+eda.pre_process_data(comments, labels)
+
+X_train, y_train, X_test, y_test = split_train(eda.train_comments, labels,\
+                                               shuffled=True, perc=10)
+
+
+criterion = torch.nn.NLLLoss()
+optimizer = torch.optim.SGD(fit.parameters(), lr=0.01)
+
+fit.half()  # convert model tensors to float16 instead of default float32
+fit.to('cuda')
+# Train the prtraining network here
+epoch = 30
+training_loss = []
+
+for e in range(epoch):
+    now = time.time()
+    running_loss = 0
+    m = len(labels)
+    for i, (comment, label) in enumerate(zip(eda.train_comments[:m], labels[:m])):
+        # Convert the int class to tensor
+        label = torch.tensor([label]).to('cuda')
+
+        # Clear the gradients
+        optimizer.zero_grad()
+        
+        # Forward pass, then backward pass, then update weights
+        output = fit(comment)
+        loss = criterion(output, label)
+        
+        # Compute gradients wrt weights and biases
+        loss.backward()
+        optimizer.step()
+        
+        running_loss += loss.item()
+        
+        if i % 1 == 0:
+            sys.stdout.write("\rProgress: {}/{} =====> ".format(i, m))
+            sys.stdout.flush()
+    total_time = time.time() - now
+    training_loss.append(running_loss)
+    print("Epoch {} training loss: {:.2f} =====> Time/Epoch: {:.2f} mins".format(e+1, \
+                                                                                running_loss, total_time /(60)))
+    
+# Save the the prtrained two layer model
+checkpoint = {'input_size': 378605,
+              'output_size': 41,
+              'hidden_layers': [fit.fc1.out_features, fit.fc2.out_features],
+              'state_dict': fit.state_dict()}
+
+torch.save(checkpoint, 'sentiment_checkpoint.pth')
+
+# Load the saved model for main training
+fit2 = torch.load('sentiment_checkpoint.pth')
+
+
+## Define the main model
+class Network(nn.Module):
+    def __init__(self):
+        super(Network, self).__init__()
+        self.fc1 = nn.Linear(len(eda.word2index), 256)
+        self.fc2 = nn.Linear(256, 1024)
+        self.fc3 = nn.Linear(1024, 256)
+        self.fc4 = nn.Linear(256, 41)
+        self.output = nn.LogSoftmax(dim=1)
+
+    def forward(self, x):
+        xin = 0
+        for index in x:
+            xin += self.fc1.weight[:, index]
+        x = F.relu(xin)
+        x = x[None, :]
+        x = F.relu(self.fc2(x))
+        x = F.relu(self.fc3(x))
+        x = F.relu(self.fc4(x))
+        x = self.output(x)
+        return x
+
+# initialize the NN
+fit1 = Network()
+print(fit1)
+
+
+## Define the main model and turn off pretrained weights and biases
+criterion = torch.nn.NLLLoss()
+
+with torch.no_grad():
+    fit1.fc1.weight = nn.Parameter(fit2['state_dict']['fc1.weight'].detach().to(torch.float32))
+    fit1.fc1.bias = nn.Parameter(fit2['state_dict']['fc1.bias'].detach().to(torch.float32))
+    fit1.fc4.weight = nn.Parameter(fit2['state_dict']['fc2.weight'].detach().to(torch.float32))
+    fit1.fc4.bias = nn.Parameter(fit2['state_dict']['fc2.bias'].detach().to(torch.float32))
+
+optimizer = torch.optim.SGD(fit1.parameters(), lr=0.01)
+
+fit1.half()  # convert model tensors to float16 instead of default float32
+fit1.to('cuda')
+
+# Train the network here
+epoch = 60
+training_loss = []
+
+for e in range(epoch):
+    now = time.time()
+    running_loss = 0
+    m = len(y_train)
+    for i, (comment, label) in enumerate(zip(X_train[:m], y_train[:m])):
+        # Convert the int class to tensor
+        label = torch.tensor([label]).to('cuda')
+
+        # Clear the gradients
+        optimizer.zero_grad()
+        
+        # Forward pass, then backward pass, then update weights
+        output = fit1(comment)
+        loss = criterion(output, label)
+        
+        # Compute gradients wrt weights and biases
+        loss.backward()
+        optimizer.step()
+        
+        running_loss += loss.item()
+        
+        if i % 1 == 0:
+            sys.stdout.write("\rProgress: {}/{} =====> ".format(i, m))
+            sys.stdout.flush()
+    total_time = time.time() - now
+    training_loss.append(running_loss)
+    print("Epoch {}/{} training loss: {:.2f} =====> Time/Epoch: {:.2f} minutes".format(e+1, epoch, \
+                                                                                running_loss, total_time /(60)))
+    # Shuffle data for next epoch
+    X_train, y_train = shuffle(X_train, y_train, len(y_train))
+    
+    
+fit_gpu.eval() # prep model for *evaluation*
+test_loss = []
+
+accuracy = 0
+running_loss = 0
+m = 10000
+for i, (comment, label) in enumerate(zip(X_test[:m], y_test[:m])):
+    # Convert the int class to tensor
+    label = torch.tensor([label]).to('cuda')
+#     label = torch.tensor([label])
+
+    # forward pass: compute predicted outputs by passing inputs to the model
+    output = fit_gpu(comment)
+    # calculate the loss
+    loss = criterion(output, label)
+    # update test loss 
+    running_loss += loss.item()
+    # convert output probabilities to predicted class
+    _, pred = torch.max(output, 1)
+    # compare predictions to true label
+    correct = torch.squeeze(pred.eq(label.data.view_as(pred)))
+    
+    if correct:
+        accuracy += 1 
+    
+    test_loss.append(running_loss)
+print("The accuracy of our model is: ", accuracy/m)
+
